@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
+using System.Security;
 using System.ServiceProcess;
 using System.Text;
 using System.Threading;
@@ -14,21 +15,27 @@ namespace EventlogToSyslog.NET
     class EventlogToSyslog : ServiceBase
     {
         private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-        private static readonly BlockingCollection<EventLogEntry> EventlogQueue = new BlockingCollection<EventLogEntry>(10000);
-        private static readonly BlockingCollection<string> DispatchQueue = new BlockingCollection<string>(10000);
+        //TODO implement some sort of collection limiting
+        private static readonly BlockingCollection<EventLogEntry> EventlogQueue = new BlockingCollection<EventLogEntry>();
+        private static readonly BlockingCollection<byte[]> DispatchQueue = new BlockingCollection<byte[]>();
         private static readonly CancellationTokenSource Cts = new CancellationTokenSource();
         public static void Start()
         {
             Log.Info("Starting");
-            var eventlog = new EventLog { Log = "Application", EnableRaisingEvents = true };
-            eventlog.EntryWritten += eventlog_EntryWritten;
-            Log.Info("Hooked into Application");
-            eventlog = new EventLog { Log = "System", EnableRaisingEvents = true };
-            eventlog.EntryWritten += eventlog_EntryWritten;
-            Log.Info("Hooked into System");
-            eventlog = new EventLog { Log = "Security", EnableRaisingEvents = true };
-            eventlog.EntryWritten += eventlog_EntryWritten;
-            Log.Info("Hooked into Security");
+
+            foreach (var logname in new[] { "Application", "System", "Security" })
+            {
+                try
+                {
+                    var eventlog = new EventLog { Log = logname, EnableRaisingEvents = true };
+                    eventlog.EntryWritten += eventlog_EntryWritten;
+                    Log.Info("Hooked into {0} Eventlog", logname);
+                }
+                catch (SecurityException ex)
+                {
+                    Log.ErrorException(string.Format("SecurityException thrown accessing {0}", logname), ex);
+                }
+            }
             var queuelistener = new Thread(ProcessIncomingEventlog);
             var dispatchthread = ConfigurationManager.AppSettings["syslogtransport"].ToLower().Equals("udp") ? new Thread(DispatchSyslogMessageUDP) : new Thread(DispatchSyslogMessageTCP);
             queuelistener.Start(Cts.Token);
@@ -55,8 +62,7 @@ namespace EventlogToSyslog.NET
             var client = new UdpClient();
             while (!cancellationtoken.IsCancellationRequested)
             {
-                var msg = DispatchQueue.Take(cancellationtoken);
-                var data = Encoding.ASCII.GetBytes(string.Concat(msg, "\n"));
+                var data = DispatchQueue.Take(cancellationtoken);
                 client.Send(data, data.Length, hostname, port);
             }
 
@@ -98,8 +104,8 @@ namespace EventlogToSyslog.NET
             var stream = client.GetStream();
             while (!cancellationtoken.IsCancellationRequested)
             {
-                var msg = DispatchQueue.Take(cancellationtoken);
-                var data = Encoding.ASCII.GetBytes(string.Concat(msg, "\n"));
+                var data = DispatchQueue.Take(cancellationtoken);
+
                 try
                 {
                     stream.Write(data, 0, data.Length);
@@ -108,7 +114,7 @@ namespace EventlogToSyslog.NET
                 {
                     Log.ErrorException("IOException thrown trying to write to remote host", ex);
                     //Throw this back on the queue
-                    DispatchQueue.Add(msg);
+                    DispatchQueue.Add(data);
                     while (!client.Connected)
                     {
                         try
@@ -139,13 +145,13 @@ namespace EventlogToSyslog.NET
             while (!cancellationtoken.IsCancellationRequested)
             {
                 var eventlog = EventlogQueue.Take(cancellationtoken);
-                var syslogstring = EventLogToSyslog(eventlog);
-                Log.Info(syslogstring);
-                DispatchQueue.Add(syslogstring);
+                var syslogmsg = EventLogToSyslog(eventlog);
+                Log.Debug(Encoding.UTF8.GetString(syslogmsg));
+                DispatchQueue.Add(syslogmsg);
             }
         }
 
-        private static string EventLogToSyslog(EventLogEntry eventlog)
+        private static byte[] EventLogToSyslog(EventLogEntry eventlog)
         {
             const Facility facility = Facility.Local0;
             var severity = Severity.Emergency;
@@ -167,16 +173,29 @@ namespace EventlogToSyslog.NET
                 case EventLogEntryType.SuccessAudit:
                     severity = Severity.Notice;
                     break;
-
-
             }
             var pri = (8 * (int)facility) + severity;
-            const string format = "<{0}>1 {1} {2} {3} {4}";
-            return string.Format(format, pri,
-                                 eventlog.TimeGenerated.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffK"), eventlog.MachineName,
-                                 eventlog.Source,
-                                 eventlog.Message);
+            //I'm reading RFC 5424 here. This has much to say.
+            //HEADER          = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
+            const string headerformat = "<{0}>{1} {2} {3} {4} {5} {6}";
+            var header = string.Format(headerformat,
+                pri,
+                1, //Version
+                eventlog.TimeGenerated.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffK"), //Timestamp
+                eventlog.MachineName, //Hostname
+                eventlog.Source, //App name
+                "-", //ProcID - we don't know this, so NILVALUE
+                eventlog.InstanceId //Msg ID
+                );
+            var msg = string.Format(" - {0}", eventlog.Message);
+            var headerbytes = Encoding.ASCII.GetBytes(header); //Header's got to be ASCII
+            var msgbytes = Encoding.UTF8.GetBytes(msg); //Message is UTF8
+            var result = new byte[headerbytes.Length + headerbytes.Length];
+            Buffer.BlockCopy(headerbytes, 0, result, 0, headerbytes.Length);
+            Buffer.BlockCopy(msgbytes, 0, result, headerbytes.Length, msgbytes.Length);
+            return msgbytes;
         }
+
         public static void Halt()
         {
             Log.Info("Told to stop. Obeying.");
