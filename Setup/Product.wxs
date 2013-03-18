@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:netfx="http://schemas.microsoft.com/wix/NetFxExtension">
+  <Product Id="*" Name="Setup" Language="1033" Version="0.1.0.0" Manufacturer="Andrew Rowson" UpgradeCode="443b8e55-db8b-49b8-8de6-315f8d73f914">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+    <PropertyRef Id="NETFRAMEWORK40CLIENT"/>
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate />
+
+    <Feature Id="ProductFeature" Title="EventlogToSyslog.NET" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+    <Condition Message="This application requires .NET Framework 4.0. Please install the .NET Framework then run this installer again.">
+      <![CDATA[Installed OR NETFRAMEWORK40CLIENT]]>
+    </Condition>
+  </Product>
+
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="EventlogToSyslog.NET" />
+      </Directory>
+    </Directory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="EventlogToSyslog.NET.exe" Guid="fdcf01b1-44f7-4a52-9f95-c326435b0275">
+        <File Source="$(var.EventlogToSyslog.NET.TargetPath)" />
+        <ServiceInstall
+             Id="ServiceInstaller"
+             Type="ownProcess"
+             Vital="yes"
+             Name="EventlogToSyslog.NET"
+             DisplayName="Eventlog To Syslog.NET"
+             Description="Fling eventlog data somewhere over syslog"
+             Start="auto"
+             Account="LocalSystem"
+             ErrorControl="ignore"
+             Interactive="no"
+              >
+        </ServiceInstall>
+        <ServiceControl Id="StartService" Start="install" Stop="both" Remove="uninstall" Name="EventlogToSyslog.NET" Wait="yes" />
+      </Component>
+      <Component Id="EventlogToSyslog.NET.exe.config" Guid="d2ec79c0-9626-48c8-9f9b-addb7842b1f0">
+        <File Source="$(var.EventlogToSyslog.NET.TargetDir)\EventlogToSyslog.NET.exe.config" />
+      </Component>
+      <Component Id="NLog.dll" Guid="78d09707-13c6-4971-9fab-76b420283a70">
+        <File Source="$(var.EventlogToSyslog.NET.TargetDir)\NLog.dll" />
+      </Component>
+      <Component Id="NLog.config" Guid="6431b6da-e767-4393-94c2-f1823f503f65">
+        <File Source="$(var.EventlogToSyslog.NET.TargetDir)\NLog.config" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

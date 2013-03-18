@@ -1,175 +1,39 @@
 ﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Net.Sockets;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
+using System.ServiceProcess;
 using NLog;
 
-namespace eventlog_to_syslog.net
+namespace EventlogToSyslog.NET
 {
     class Program
     {
-        private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-        private static readonly BlockingCollection<EventLogEntry> EventlogQueue = new BlockingCollection<EventLogEntry>(10000);
-        private static readonly BlockingCollection<string> DispatchQueue = new BlockingCollection<string>(10000);
-        static void Main(string[] args)
+        static Logger _log;
+        static void Main()
         {
-            Log.Info("Starting");
-            var eventlog = new EventLog { Log = "Application", EnableRaisingEvents = true };
-            eventlog.EntryWritten += eventlog_EntryWritten;
-            Log.Info("Hooked into Application");
-            eventlog = new EventLog { Log = "System", EnableRaisingEvents = true };
-            eventlog.EntryWritten += eventlog_EntryWritten;
-            Log.Info("Hooked into System");
-            eventlog = new EventLog { Log = "Security", EnableRaisingEvents = true };
-            eventlog.EntryWritten += eventlog_EntryWritten;
-            Log.Info("Hooked into Security");
-            var queuelistener = new Thread(ProcessIncomingEventlog);
-            var dispatchthread = new Thread(DispatchSyslogMessageTCP);
-            queuelistener.Start();
-            dispatchthread.Start();
+            _log = LogManager.GetCurrentClassLogger();
+#if DEBUG
+            LogManager.GlobalThreshold = LogLevel.Trace;
+#endif
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomainUnhandledException;
 
-        }
-        static void eventlog_EntryWritten(object sender, EntryWrittenEventArgs e)
-        {
-            EventlogQueue.Add(e.Entry);
-        }
-
-
-        private static void DispatchSyslogMessageTCP()
-        {
-            const string hostname = "gcsmon01.amers1.ciscloud";
-            const int port = 5145;
-            var type = "TCP";
-            Log.Info("Attempting initial connect to remote host");
-            TcpClient client = null;
-            var sleeptime = 1000;
-            while (client == null || !client.Connected)
+            if (Environment.UserInteractive)
             {
-                try
+                EventlogToSyslog.Start();
+                Console.CancelKeyPress += delegate
                 {
-                    client = new TcpClient(hostname, port);
-                }
-                catch (SocketException ex)
-                {
-                    Log.ErrorException(string.Format("SocketException trying to reconnect to host. Pausing for {0}ms.",sleeptime), ex);
-                    Thread.Sleep(sleeptime);
-                    //Backoff
-                    sleeptime *= 2;
-                }
+                    _log.Info("Cancel Key Pressed. Shutting Down.");
+                };
             }
-            Log.Info("Connected");
-            var stream = client.GetStream();
-            while (true)
+            else
             {
-                var msg = DispatchQueue.Take();
-                var data = Encoding.ASCII.GetBytes(string.Concat(msg, "\n"));
-                try
-                {
-                    stream.Write(data, 0, data.Length);
-                }
-                catch (IOException ex)
-                {
-                    Log.ErrorException("IOException thrown trying to write to remote host", ex);
-                    try
-                    {
-                        client = new TcpClient(hostname, port);
-                        stream = client.GetStream();
-                    }
-                    catch (SocketException ex2)
-                    {
-                        Log.ErrorException("SocketException trying to reconnect to host. Pausing for a bit.", ex2);
-                        Thread.Sleep(5000);
-                    }
-                    //Throw this back on the queue
-                    DispatchQueue.Add(msg);
-                }
+                var servicesToRun = new ServiceBase[] { new EventlogToSyslog() };
+                ServiceBase.Run(servicesToRun);
             }
-        }
 
-        static void ProcessIncomingEventlog()
+        }
+        static void CurrentDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
-            while (true)
-            {
-                var eventlog = EventlogQueue.Take();
-                var syslogstring = EventLogToSyslog(eventlog);
-                Log.Info(syslogstring);
-                DispatchQueue.Add(syslogstring);
-            }
+            _log.Error("Global Exception handler called with exectpion: {0}", e.ExceptionObject);
         }
 
-        private static string EventLogToSyslog(EventLogEntry eventlog)
-        {
-            const FACILITY facility = FACILITY.LOCAL0;
-            var severity = SEVERITY.EMERGENCY;
-            switch (eventlog.EntryType)
-            {
-                case EventLogEntryType.Error:
-                    severity = SEVERITY.ERROR;
-                    break;
-                case 0:
-                case EventLogEntryType.Information:
-                    severity = SEVERITY.INFORMATIONAL;
-                    break;
-                case EventLogEntryType.Warning:
-                    severity = SEVERITY.WARNING;
-                    break;
-                case EventLogEntryType.FailureAudit:
-                    severity = SEVERITY.NOTICE;
-                    break;
-                case EventLogEntryType.SuccessAudit:
-                    severity = SEVERITY.NOTICE;
-                    break;
-
-
-            }
-            var pri = (8 * (int)facility) + severity;
-            const string format = "<{0}>1 {1} {2} {3} {4}";
-            return string.Format(format, pri,
-                                 eventlog.TimeGenerated.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffK"), eventlog.MachineName,
-                                 eventlog.Source,
-                                 eventlog.Message);
-        }
-    }
-    enum FACILITY
-    {
-        KERNEL = 0,
-        USER = 1,
-        MAIL = 2,
-        SYSTEM = 3,
-        SECURITY = 4,
-        INTERNAL = 5,
-        LPT = 6,
-        NEWS = 7,
-        UUCP = 8,
-        CLOCK = 9,
-        FTP = 11,
-        NTP = 12,
-        AUDIT = 13,
-        ALERT = 14,
-        LOCAL0 = 16,
-        LOCAL1 = 17,
-        LOCAL2 = 18,
-        LOCAL3 = 19,
-        LOCAL4 = 20,
-        LOCAL5 = 21,
-        LOCAL6 = 22,
-        LOCAL7 = 23,
-    }
-    enum SEVERITY
-    {
-        EMERGENCY = 0,
-        ALERT = 1,
-        CRITICAL = 2,
-        ERROR = 3,
-        WARNING = 4,
-        NOTICE = 5,
-        INFORMATIONAL = 6,
-        DEBUG = 7
     }
 }

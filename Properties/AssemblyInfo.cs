@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("eventlog-to-syslog.net")]
+[assembly: AssemblyTitle("EventlogToSyslog.NET")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("eventlog-to-syslog.net")]
+[assembly: AssemblyProduct("EventlogToSyslog.NET")]
 [assembly: AssemblyCopyright("Copyright © Andrew Rowson 2013")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
