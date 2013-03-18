@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
@@ -14,8 +15,8 @@ namespace eventlog_to_syslog.net
     class Program
     {
         private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-        private static readonly BlockingCollection<EventLogEntry> EventlogQueue = new BlockingCollection<EventLogEntry>();
-        private static readonly BlockingCollection<string> DispatchQueue = new BlockingCollection<string>();
+        private static readonly BlockingCollection<EventLogEntry> EventlogQueue = new BlockingCollection<EventLogEntry>(10000);
+        private static readonly BlockingCollection<string> DispatchQueue = new BlockingCollection<string>(10000);
         static void Main(string[] args)
         {
             Log.Info("Starting");
@@ -29,7 +30,7 @@ namespace eventlog_to_syslog.net
             eventlog.EntryWritten += eventlog_EntryWritten;
             Log.Info("Hooked into Security");
             var queuelistener = new Thread(ProcessIncomingEventlog);
-            var dispatchthread = new Thread(DispatchSyslogMessage);
+            var dispatchthread = new Thread(DispatchSyslogMessageTCP);
             queuelistener.Start();
             dispatchthread.Start();
 
@@ -40,21 +41,53 @@ namespace eventlog_to_syslog.net
         }
 
 
-        private static void DispatchSyslogMessage()
+        private static void DispatchSyslogMessageTCP()
         {
-            var hostname = "gcsmon01.amers1.ciscloud";
-            var port = 5145;
-            using (var client = new TcpClient(hostname, port))
+            const string hostname = "gcsmon01.amers1.ciscloud";
+            const int port = 5145;
+            var type = "TCP";
+            Log.Info("Attempting initial connect to remote host");
+            TcpClient client = null;
+            var sleeptime = 1000;
+            while (client == null || !client.Connected)
             {
-                using (var stream = client.GetStream())
+                try
                 {
-                    while (true)
+                    client = new TcpClient(hostname, port);
+                }
+                catch (SocketException ex)
+                {
+                    Log.ErrorException(string.Format("SocketException trying to reconnect to host. Pausing for {0}ms.",sleeptime), ex);
+                    Thread.Sleep(sleeptime);
+                    //Backoff
+                    sleeptime *= 2;
+                }
+            }
+            Log.Info("Connected");
+            var stream = client.GetStream();
+            while (true)
+            {
+                var msg = DispatchQueue.Take();
+                var data = Encoding.ASCII.GetBytes(string.Concat(msg, "\n"));
+                try
+                {
+                    stream.Write(data, 0, data.Length);
+                }
+                catch (IOException ex)
+                {
+                    Log.ErrorException("IOException thrown trying to write to remote host", ex);
+                    try
                     {
-                        var msg = DispatchQueue.Take();
-
-                        var data = Encoding.ASCII.GetBytes(string.Concat(msg, "\n"));
-                        stream.Write(data, 0, data.Length);
+                        client = new TcpClient(hostname, port);
+                        stream = client.GetStream();
                     }
+                    catch (SocketException ex2)
+                    {
+                        Log.ErrorException("SocketException trying to reconnect to host. Pausing for a bit.", ex2);
+                        Thread.Sleep(5000);
+                    }
+                    //Throw this back on the queue
+                    DispatchQueue.Add(msg);
                 }
             }
         }
