@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Security;
 using System.ServiceProcess;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using NLog;
 
@@ -23,13 +24,13 @@ namespace EventlogToSyslog.NET
         {
             Log.Info("Starting");
 
-            foreach (var logname in new[] { "Application", "System", "Security" })
+            foreach (var logname in EventLog.GetEventLogs())
             {
                 try
                 {
-                    var eventlog = new EventLog { Log = logname, EnableRaisingEvents = true };
+                    var eventlog = new EventLog { Log = logname.Log, EnableRaisingEvents = true };
                     eventlog.EntryWritten += eventlog_EntryWritten;
-                    Log.Info("Hooked into {0} Eventlog", logname);
+                    Log.Info("Hooked into {0} Eventlog", logname.Log);
                 }
                 catch (SecurityException ex)
                 {
@@ -46,7 +47,6 @@ namespace EventlogToSyslog.NET
         {
             EventlogQueue.Add(e.Entry);
         }
-
 
         private static void DispatchSyslogMessageUDP(object token)
         {
@@ -105,10 +105,11 @@ namespace EventlogToSyslog.NET
             while (!cancellationtoken.IsCancellationRequested)
             {
                 var data = DispatchQueue.Take(cancellationtoken);
-
                 try
                 {
                     stream.Write(data, 0, data.Length);
+                    //Because we're a persistent TCP stream, \r\n appears to be needed to say FINISHED NOW!!!
+                    stream.Write(new byte[] { 13, 10 }, 0, 2);
                 }
                 catch (IOException ex)
                 {
@@ -176,8 +177,8 @@ namespace EventlogToSyslog.NET
             }
             var pri = (8 * (int)facility) + severity;
             //I'm reading RFC 5424 here. This has much to say.
-            //HEADER          = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
-            const string headerformat = "<{0}>{1} {2} {3} {4} {5} {6}";
+            //HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
+            const string headerformat = "<{0}>{1} {2} {3} {4} {5} {6} - ";
             var header = string.Format(headerformat,
                 pri,
                 1, //Version
@@ -187,13 +188,17 @@ namespace EventlogToSyslog.NET
                 "-", //ProcID - we don't know this, so NILVALUE
                 eventlog.InstanceId //Msg ID
                 );
-            var msg = string.Format(" - {0}", eventlog.Message);
+            var msg = eventlog.Message;
+            //Control characters aren't really allowed in syslog messages, so lets strip them.
+            msg = Regex.Replace(msg, @"\p{C}+", "");            
             var headerbytes = Encoding.ASCII.GetBytes(header); //Header's got to be ASCII
-            var msgbytes = Encoding.UTF8.GetBytes(msg); //Message is UTF8
-            var result = new byte[headerbytes.Length + headerbytes.Length];
+            var utf8 = new UTF8Encoding(true);
+            msg = string.Concat(utf8.GetString(utf8.GetPreamble()), msg);            
+            var msgbytes = utf8.GetBytes(msg); //Message is UTF8
+            var result = new byte[headerbytes.Length + msgbytes.Length + 3]; //3 is for the BOM, because msg is UTF-8
             Buffer.BlockCopy(headerbytes, 0, result, 0, headerbytes.Length);
             Buffer.BlockCopy(msgbytes, 0, result, headerbytes.Length, msgbytes.Length);
-            return msgbytes;
+            return result;
         }
 
         public static void Halt()

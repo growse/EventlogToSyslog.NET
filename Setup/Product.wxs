@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:netfx="http://schemas.microsoft.com/wix/NetFxExtension">
-  <Product Id="*" Name="Setup" Language="1033" Version="0.1.0.0" Manufacturer="Andrew Rowson" UpgradeCode="443b8e55-db8b-49b8-8de6-315f8d73f914">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:netfx="http://schemas.microsoft.com/wix/NetFxExtension" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Product Id="*" Name="EventlogToSyslog.NET" Language="1033" Version="0.1.0.0" Manufacturer="Andrew Rowson" UpgradeCode="443b8e55-db8b-49b8-8de6-315f8d73f914">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
     <PropertyRef Id="NETFRAMEWORK40CLIENT"/>
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
@@ -42,7 +42,30 @@
         <ServiceControl Id="StartService" Start="install" Stop="both" Remove="uninstall" Name="EventlogToSyslog.NET" Wait="yes" />
       </Component>
       <Component Id="EventlogToSyslog.NET.exe.config" Guid="d2ec79c0-9626-48c8-9f9b-addb7842b1f0">
-        <File Source="$(var.EventlogToSyslog.NET.TargetDir)\EventlogToSyslog.NET.exe.config" />
+        <File Source="$(var.EventlogToSyslog.NET.TargetDir)\EventlogToSyslog.NET.exe.config" Name="EventlogToSyslog.NET.exe.config" />
+
+      </Component>
+      <Component Id="UpdateConfigFileHost" Guid="c7ca46df-96db-438c-b859-42377c751110">
+        <Condition>SYSLOGHOST</Condition>
+        <CreateFolder/>
+        <util:XmlFile
+          Id="SetHost"
+          Action="setValue"
+          ElementPath="//appSettings/add[\[]@key='sysloghost'[\]]/@value"
+          Value="[SYSLOGHOST]"
+          File="[#EventlogToSyslog.NET.exe.config]"
+          />
+      </Component>
+      <Component Id="UpdateConfigFilePort" Guid="0a745c90-2c74-48d9-a23d-e4af0032c544">
+        <Condition>SYSLOGPORT</Condition>
+        <CreateFolder/>
+        <util:XmlFile
+          Id="SetPort"
+          Action="setValue"
+          ElementPath="//appSettings/add[\[]@key='syslogport'[\]]/@value"
+          Value="[SYSLOGPORT]"
+          File="[#EventlogToSyslog.NET.exe.config]"
+          />
       </Component>
       <Component Id="NLog.dll" Guid="78d09707-13c6-4971-9fab-76b420283a70">
         <File Source="$(var.EventlogToSyslog.NET.TargetDir)\NLog.dll" />
