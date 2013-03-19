@@ -109,7 +109,7 @@ namespace EventlogToSyslog.NET
                 {
                     stream.Write(data, 0, data.Length);
                     //Because we're a persistent TCP stream, \r\n appears to be needed to say FINISHED NOW!!!
-                    stream.Write(new byte[] { 13, 10 }, 0, 2);
+                    stream.Write(new byte[] { 10 }, 0, 1);
                 }
                 catch (IOException ex)
                 {
@@ -192,12 +192,12 @@ namespace EventlogToSyslog.NET
                 );
             var msg = eventlog.Message;
             //Control characters aren't really allowed in syslog messages, so lets strip them.
-            msg = Regex.Replace(msg, @"\p{C}+", "");            
+            msg = Regex.Replace(msg, @"\p{C}+", "");
             var headerbytes = Encoding.ASCII.GetBytes(header); //Header's got to be ASCII
             var utf8 = new UTF8Encoding(true);
-            msg = string.Concat(utf8.GetString(utf8.GetPreamble()), msg);            
+            msg = string.Concat(utf8.GetString(utf8.GetPreamble()), msg);
             var msgbytes = utf8.GetBytes(msg); //Message is UTF8
-            var result = new byte[headerbytes.Length + msgbytes.Length + 3]; //3 is for the BOM, because msg is UTF-8
+            var result = new byte[headerbytes.Length + msgbytes.Length];
             Buffer.BlockCopy(headerbytes, 0, result, 0, headerbytes.Length);
             Buffer.BlockCopy(msgbytes, 0, result, headerbytes.Length, msgbytes.Length);
             return result;
