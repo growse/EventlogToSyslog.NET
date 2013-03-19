@@ -133,6 +133,8 @@ namespace EventlogToSyslog.NET
                             }
                         }
                     }
+                    Log.Info("Connected");
+                    sleeptime = 100;
                     stream = client.GetStream();
                 }
             }
