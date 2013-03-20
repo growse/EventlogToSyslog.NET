@@ -15,7 +15,7 @@ Details
 
 This is a fairly simple bit of code that aims to hook into all the Eventlogs it can find (or has permission for), listen for events, and forward them in a RFC5424-compatible way to a remove host over either TCP or UDP.
 
-There are some known issues / implementation quirks that's worth pointing:
+There are some known issues / implementation quirks that's worth pointing out:
 
 1. (bug) There's currently no limit on the internal message buffer size. This isn't so much an issue for UDP, where it'll just throw messages on the wire. For TCP however, if there's no connection, it'll buffer up until it gets one. If this never happens, this will probably end up chewing through all your memory.
 2. TCP transport: If a connection is lost, it'll try to reconnect after 100ms, and then backoff the rate until it's about 1 every 60s.
